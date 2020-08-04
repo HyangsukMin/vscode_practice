@@ -264,3 +264,88 @@ global_avg_pool(cropped_images)
 output_global_avg2 = keras.layers.Lambda(lambda X : tf.reduce_mean(X, axis=[1,2]))
 output_global_avg2(cropped_images)
 # %%
+###########################################################################################
+## CNN Architectures
+###########################################################################################
+(X_train_full, y_train_full) , (X_test, y_test) = keras.datasets.fashion_mnist.load_data()
+X_train, X_valid = X_train_full[:-5000], X_train_full[-5000:]
+y_train, y_valid = y_train_full[:-5000], y_train_full[-5000:]
+
+X_mean = X_train.mean(axis=0, keepdims=True)
+X_std = X_train.std(axis=0, keepdims=True) + 1e-7
+X_train = (X_train - X_mean) / X_std
+X_valid = (X_valid - X_mean) / X_std
+X_test = (X_test - X_mean) / X_std
+
+X_train = X_train[..., np.newaxis]
+X_valid = X_valid[..., np.newaxis]
+X_test = X_test[..., np.newaxis]
+
+from functools import partial
+DefaultConv2D = partial(keras.layers.Conv2D,kernel_size = 3, activation='relu', padding='SAME')
+
+model = keras.models.Sequential([
+    DefaultConv2D(filters=64, kernel_size = 7, input_shape=[28,28,1]),
+    keras.layers.MaxPool2D(pool_size=2),
+    DefaultConv2D(filters=128),
+    DefaultConv2D(filters=128),
+    keras.layers.MaxPool2D(pool_size=2),
+    DefaultConv2D(filters=256),
+    DefaultConv2D(filters=256),
+    keras.layers.MaxPool2D(pool_size=2),
+    keras.layers.Flatten(),
+    keras.layers.Dense(units=128, activation='relu'),
+    keras.layers.Dropout(0.5),
+    keras.layers.Dense(units=64, activation='relu'),
+    keras.layers.Dropout(0.5),
+    keras.layers.Dense(units=10, activation='softmax')
+])
+
+model.compile(loss='sparse_categorical_crossentropy', optimizer='nadam', metrics=['accuracy'])
+history = model.fit(X_train, y_train, epochs=1 validation_data=(X_valid, y_valid))
+score = model.evaluate(X_test, y_test)
+X_new = X_test[:10]
+y_pred = model.predict(X_new)
+
+#%%
+###########################################################################################
+## ResNet-34
+###########################################################################################
+DefaultConv2D = partial(keras.layers.Conv2D, kernel_size=3, strides=1, padding='SAME', use_bias=False)
+
+class ResidualUnit(keras.layers.Layer):
+    def __init__(self, filters, strides=1, activation='relu', **kwargs):
+        super().__init__(**kwargs)
+        self.activatin = keras.activations.get(activation)
+        self.main_layers = [
+            DefaultConv2D(filters, strides=strides),
+            keras.layers.BatchNormalization(),
+            self.activatin,
+            DefaultConv2D(filters),
+            keras.layers.BatchNormalization()]
+        self.skip_layers = []
+        if strides > 1:
+            self.skip_layers = [
+                DefaultConv2D(filters, kernel_size = 1, strides = strides),
+                keras.layers.BatchNormalization()]
+    def call(self, inputs):
+        Z = inpus
+        for layer in self.main_layers:
+            Z = layer(Z)
+        skip_Z = inputs
+        for layer in self.skip_layers:
+            skip_Z = layer(skip_Z)
+        return self.activation(Z+skip_Z)
+
+model = keras.models.Sequential()
+model.add(DefaultConv2D(64, kernel_size = 7, strides = 2, input_shpae = [224, 224, 3]))
+model.add(keras.layers.BatchNormalization())
+model.add(keras.layers.MaxPool2D(pool_size = 3, strides = 2, padding='SAME'))
+prev_filters = 64
+for filters in [64]*3 + [128]*4 + [256]*6 + [512]*3:
+    strides = 1 if filters == prev_filters else 2
+    model.add(ResidualUnit(filters, strides = strides))
+    prev_filters = filters
+model.add(keras.layers.GlobalAvgPool2D())
+model.add(keras.layers.Flatten())
+model.add(keras.layers.Dense(10, activation = 'softmax'))
